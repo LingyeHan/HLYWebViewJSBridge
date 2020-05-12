@@ -28,15 +28,16 @@ TODO: Add long description of the pod here.
   s.source           = { :git => 'https://github.com/LingyeHan/HLYWebViewJSBridge.git', :tag => s.version.to_s }
   # s.social_media_url = 'https://twitter.com/<TWITTER_USERNAME>'
 
-  s.ios.deployment_target = '11.0'
+  s.ios.deployment_target = '10.0'
 
-  s.source_files = 'HLYWebViewJSBridge/Classes/**/*'
+  s.source_files = 'HLYWebViewJSBridge/Classes/**/*.{swift}'
   
   s.resource_bundles = {
       'HLYWebViewJSBridge' => ['HLYWebViewJSBridge/Assets/*.{js,json,png}']
   }
 
-  # s.public_header_files = 'Pod/Classes/**/*.h'
+  s.requires_arc = true
+#   s.public_header_files = 'Pod/Classes/**/*.h'
   # s.frameworks = 'UIKit', 'MapKit'
   # s.dependency 'AFNetworking', '~> 2.3'
 end
