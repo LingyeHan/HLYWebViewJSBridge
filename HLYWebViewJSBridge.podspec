@@ -9,7 +9,7 @@
 Pod::Spec.new do |s|
   s.name             = 'HLYWebViewJSBridge'
   s.version          = '0.1.0'
-  s.summary          = 'An iOS & OSX bridge for sending messages between Obj-C/Swift and JavaScript in WKWebViews &amp; WebViews.'
+  s.summary          = 'An iOS & OSX bridge for sending messages between Obj-C/Swift and JavaScript in WKWebViews.'
 
 # This description is used to generate tags and improve search results.
 #   * Think: What does it do? Why did you write it? What is the focus?
@@ -29,15 +29,16 @@ TODO: Add long description of the pod here.
   # s.social_media_url = 'https://twitter.com/<TWITTER_USERNAME>'
 
   s.ios.deployment_target = '10.0'
+  s.requires_arc = true
 
-  s.source_files = 'HLYWebViewJSBridge/Classes/**/*.{swift}'
+  s.source_files = 'HLYWebViewJSBridge/Classes/*.{swift}'
   
   s.resource_bundles = {
       'HLYWebViewJSBridge' => ['HLYWebViewJSBridge/Assets/*.{js,json,png}']
   }
 
-  s.requires_arc = true
 #   s.public_header_files = 'Pod/Classes/**/*.h'
-  # s.frameworks = 'UIKit', 'MapKit'
+  s.frameworks = 'WebKit'
+  s.ios.frameworks = 'UIKit', 'WebKit'
   # s.dependency 'AFNetworking', '~> 2.3'
 end
