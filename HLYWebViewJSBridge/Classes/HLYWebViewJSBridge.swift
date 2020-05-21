@@ -33,10 +33,14 @@ open class HLYWebViewJSBridge: NSObject {
     fileprivate lazy var responseCallbacks = [String: WVJBResponseCallback]()
     fileprivate lazy var startupMessageQueue: [WVJBMessage]? = { [WVJBMessage]() }()
     fileprivate weak var webView: WKWebView?
-    public weak var navigationDelegate: WKNavigationDelegate?
+    public weak var webViewDelegate: WKNavigationDelegate?
     
     public class func enableLogging() { logging = true }
     public class func setLogMaxLength(_ length: Int) { logMaxLength = length }
+    
+    deinit {
+//        self.webViewDelegate = nil
+    }
     
     fileprivate override init() {
         super.init()
@@ -45,7 +49,8 @@ open class HLYWebViewJSBridge: NSObject {
     fileprivate convenience init(webView: WKWebView) {
         self.init()
         self.webView = webView
-        webView.navigationDelegate = self
+        self.webViewDelegate = webView.navigationDelegate // keep ref to original deleagate
+        self.webView!.navigationDelegate = self
     }
     
     public class func bridge(_ webView: WKWebView) -> HLYWebViewJSBridge {
@@ -98,15 +103,18 @@ extension HLYWebViewJSBridge {
 extension HLYWebViewJSBridge: WKNavigationDelegate {
     
     public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let webView = self.webView else { return }
-        guard let url = navigationAction.request.url else { return }
-        print("==> decidePolicyFor: \(url)")
+        if webView != self.webView { return }
+        
+        guard let url = navigationAction.request.url else {
+            return
+        }
+        //print("==> decidePolicyFor: \(url)")
         if isJavascriptBridgeURL(url) {
             if isBridgeLoadedURL(url) {
-                print("==> injectJavascriptFile: \(url)")
+                //print("==> injectJavascriptFile: \(url)")
                 injectJavascriptFile()
             } else if isQueueMessageURL(url) {
-                print("==> flushMessageQueue: \(url)")
+                //print("==> flushMessageQueue: \(url)")
                 flushMessageQueue()
             } else {
                 // Unkown Message
@@ -115,53 +123,52 @@ extension HLYWebViewJSBridge: WKNavigationDelegate {
             decisionHandler(WKNavigationActionPolicy.cancel)
             return
         }
-        
-        if let navigationDelegate = self.navigationDelegate {
-            navigationDelegate.webView?(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
+
+        typealias WKNavigationActionMethodType = (WKWebView, WKNavigationAction, @escaping (WKNavigationActionPolicy) -> Void) -> Void
+        if let webViewDelegate = self.webViewDelegate, webViewDelegate.responds(to: #selector(webView(_:decidePolicyFor:decisionHandler:) as WKNavigationActionMethodType)) {
+            webViewDelegate.webView?(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
         } else {
             decisionHandler(WKNavigationActionPolicy.allow)
         }
     }
     
     public func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
-        guard let webView = self.webView else { return }
-        print("==> navigationResponse: \(navigationResponse.response.url)")
-        if let navigationDelegate = self.navigationDelegate {
-            navigationDelegate.webView?(webView, decidePolicyFor: navigationResponse, decisionHandler: decisionHandler)
-        } else {
+        if webView != self.webView { return }
+        //print("==> navigationResponse: \(navigationResponse.response.url)")
+        if self.webViewDelegate?.webView?(webView, decidePolicyFor: navigationResponse, decisionHandler: decisionHandler) == nil {
             decisionHandler(WKNavigationResponsePolicy.allow)
         }
     }
     
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        guard let webView = self.webView else { return }
+        if webView != self.webView { return }
 
-        self.navigationDelegate?.webView?(webView, didStartProvisionalNavigation: navigation)
+        self.webViewDelegate?.webView?(webView, didStartProvisionalNavigation: navigation)
     }
     
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        guard let webView = self.webView else { return }
+        if webView != self.webView { return }
 
-        self.navigationDelegate?.webView?(webView, didFailProvisionalNavigation: navigation, withError: error)
+        self.webViewDelegate?.webView?(webView, didFailProvisionalNavigation: navigation, withError: error)
     }
     
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard let webView = self.webView else { return }
-        
-        self.navigationDelegate?.webView?(webView, didFinish: navigation)
+        if webView != self.webView { return }
+
+        self.webViewDelegate?.webView?(webView, didFinish: navigation)
     }
     
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        guard let webView = self.webView else { return }
+        if webView != self.webView { return }
 
-        self.navigationDelegate?.webView?(webView, didFail: navigation, withError: error)
+        self.webViewDelegate?.webView?(webView, didFail: navigation, withError: error)
     }
 
     public func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        guard let webView = self.webView else { return }
-        
-        if let navigationDelegate = self.navigationDelegate {
-            navigationDelegate.webView?(webView, didReceive: challenge, completionHandler: completionHandler)
+        if webView != self.webView { return }
+
+        if let webViewDelegate = self.webViewDelegate, webViewDelegate.webView?(webView, didReceive: challenge, completionHandler: completionHandler) != nil {
+            webViewDelegate.webView?(webView, didReceive: challenge, completionHandler: completionHandler)
         } else {
             completionHandler(URLSession.AuthChallengeDisposition.performDefaultHandling, nil)
         }
@@ -199,7 +206,7 @@ extension HLYWebViewJSBridge {
     private func flushMessageQueue() {
         self.webView?.evaluateJavaScript("WebViewJavascriptBridge._fetchQueue();", completionHandler: { (result, error) in
             if error != nil {
-                NSLog("WVJB WARNING: Error when trying to fetch data from WKWebView: \(error)")
+                NSLog("WVJB WARNING: Error when trying to fetch data from WKWebView: \(error!.localizedDescription)")
             }
             if let message = result as? String {
                 self.handleQueueMessage(message)
@@ -214,7 +221,7 @@ extension HLYWebViewJSBridge {
         }
 
         guard let messages = deserializeMessage(jsonMessage) as? Array<Any> else {
-            log(action: "Handle Message Error", message: "message is not array")
+            NSLog("WVJB Handle Message Error: message is not array")
             return
         }
 
@@ -274,7 +281,7 @@ extension HLYWebViewJSBridge {
                 self.startupMessageQueue = nil // TODO 仅为了添加一个默认 Message
             }
         } catch let error as NSError {
-            log(action: "Inject Javascript File Error", message: error.localizedDescription)
+            NSLog("WVJB Inject Javascript File Error: \(error.localizedDescription)")
         }
     }
 
@@ -323,7 +330,7 @@ extension HLYWebViewJSBridge {
             let jsonData = try JSONSerialization.data(withJSONObject: message, options: JSONSerialization.WritingOptions())
             return String(data: jsonData, encoding: String.Encoding.utf8)
         } catch let error as NSError {
-            log(action: "Serialize Message Error", message: error.localizedDescription)
+            NSLog("WVJB Serialize Message Error: \(error.localizedDescription)")
             return nil
         }
     }
@@ -337,7 +344,7 @@ extension HLYWebViewJSBridge {
             let jsonObj = try JSONSerialization.jsonObject(with: serializedData, options: .allowFragments)
             return jsonObj
         } catch let error as NSError {
-            log(action: "Deserialize Message Error", message: error.localizedDescription)
+            NSLog("WVJB Deserialize Message Error: \(error.localizedDescription)")
             return nil
         }
     }

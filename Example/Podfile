@@ -4,6 +4,7 @@ platform :ios, '11.0'
 
 target 'HLYWebViewJSBridge_Example' do
   pod 'HLYWebViewJSBridge', :path => '../'
+#  pod 'HLYWebViewJSBridge', :git => 'https://github.com/LingyeHan/HLYWebViewJSBridge.git', :branch => 'master'
 
   target 'HLYWebViewJSBridge_Tests' do
     inherit! :search_paths
