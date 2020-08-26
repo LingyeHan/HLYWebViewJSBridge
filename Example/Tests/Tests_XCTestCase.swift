@@ -39,14 +39,14 @@ class Tests_XCTestCase: XCTestCase {
     func testRegisterHandler() {
         let bridge = self.bridge()
         XCTAssertNotNil(bridge)
-        
+
         let expectation = self.expectation(description: "Register Handler")
         bridge.registerHandler("nativeFunc") { (data, responseCallback) in
             XCTAssertEqual(data as? String, "Hello world")
             expectation.fulfill()
         }
-        
-        loadEchoSample()
+
+        loadJSBridgeTestHTML()
         waitForExpectations(timeout: timeout, handler: nil)
     }
 
@@ -56,9 +56,9 @@ class Tests_XCTestCase: XCTestCase {
         bridge.callHandler("echoHandler", data: "echo hello!") { (responseData) in
             XCTAssertEqual(responseData as? String, "echo hello!");
             callbackInvoked.fulfill()
-        };
+        }
 
-        loadEchoSample()
+        loadJSBridgeTestHTML()
         waitForExpectations(timeout: timeout, handler: nil)
     }
 
@@ -72,7 +72,7 @@ class Tests_XCTestCase: XCTestCase {
             }
         }
         
-        loadEchoSample()
+        loadJSBridgeTestHTML()
         waitForExpectations(timeout: timeout, handler: nil)
     }
 
@@ -96,7 +96,7 @@ class Tests_XCTestCase: XCTestCase {
         echoObject([1, 2, 3]);
         echoObject(["a": 1, "b": 2]);
 
-        loadEchoSample()
+        loadJSBridgeTestHTML()
         waitForExpectations(timeout: timeout, handler: nil)
     }
 
@@ -113,7 +113,7 @@ class Tests_XCTestCase: XCTestCase {
             callbackInvoked.fulfill()
         }
         
-        loadEchoSample()
+        loadJSBridgeTestHTML()
         waitForExpectations(timeout: timeout, handler: nil)
     }
 
@@ -129,7 +129,7 @@ class Tests_XCTestCase: XCTestCase {
             XCTAssertEqual(responseData as! String, "Response from JS");
             callbackInvoked.fulfill()
         }
-        loadEchoSample()
+        loadJSBridgeTestHTML()
         waitForExpectations(timeout: timeout, handler: nil)
     }
 
@@ -157,18 +157,18 @@ class Tests_XCTestCase: XCTestCase {
             }
         }
         
-        loadEchoSample()
+        loadJSBridgeTestHTML()
         waitForExpectations(timeout: timeout, handler: nil)
     }
- 
+
     private func bridge() -> HLYWebViewJSBridge {
         let bridge = HLYWebViewJSBridge.bridge(wkWebView)
         bridgeRefs.append(bridge)
         return bridge
     }
     
-    private func loadEchoSample() {
-        let request = URLRequest(url: Bundle.main.url(forResource: "echo", withExtension: "html")!)
+    private func loadJSBridgeTestHTML() {
+        let request = URLRequest(url: Bundle.main.url(forResource: "JSBridgeTest", withExtension: "html")!)
         wkWebView.load(request)
     }
 

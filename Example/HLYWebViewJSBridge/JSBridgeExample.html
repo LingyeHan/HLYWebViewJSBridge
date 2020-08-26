@@ -1,0 +1,50 @@
+<!doctype html>
+<html><head>
+</head><body>
+	<p>WebViewJavascriptBridge Example.html</p>
+	<script>
+	function setupWebViewJavascriptBridge(callback) {
+		if (window.WebViewJavascriptBridge) { return callback(WebViewJavascriptBridge); }
+		if (window.WVJBCallbacks) { return window.WVJBCallbacks.push(callback); }
+		window.WVJBCallbacks = [callback];
+		var WVJBIframe = document.createElement('iframe');
+		WVJBIframe.style.display = 'none';
+		WVJBIframe.src = 'https://__bridge_loaded__';
+		document.documentElement.appendChild(WVJBIframe);
+		setTimeout(function() { document.documentElement.removeChild(WVJBIframe) }, 0)
+	}
+
+    // 注册 JS 方法给 Native 调用
+	setupWebViewJavascriptBridge(function(bridge) {
+		bridge.registerHandler('nativeCallJSHandler', function(data, responseCallback) {
+			
+		})
+        bridge.registerHandler('nativeCallJSHandler_1', function(data, responseCallback) {
+            responseCallback(data)
+        })
+		bridge.registerHandler('jsRcvResponseTest', function(data, responseCallback) {
+			bridge.callHandler('objcEchoToJs', { foo:'bar' }, function(response) {
+				if (response && response.foo == 'bar') {
+					responseCallback("Response from JS")
+				} else {
+					responseCallback("Failed")
+				}
+			})
+		})
+	})
+    
+    // JS 调用 Native 方法
+    setupWebViewJavascriptBridge(function(bridge) {
+        bridge.callHandler('jsCallNativeHandler', 'Hello world');
+        
+        bridge.callHandler('jsCallNativeHandler_1', { foo:'bar' }, function(response) {
+            if (response && response.foo == 'bar') {
+                responseCallback("Response from JS")
+            } else {
+                responseCallback("Failed")
+            }
+        })
+         
+    })
+	</script>
+</body></html>

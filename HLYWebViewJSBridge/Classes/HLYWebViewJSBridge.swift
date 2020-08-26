@@ -9,17 +9,42 @@
 import Foundation
 import WebKit
 
-private let kOldProtocolScheme = "wvjbscheme"
-private let kNewProtocolScheme = "https"
-private let kQueueHasMessage = "__wvjb_queue_message__"
-private let kBridgeLoaded = "__bridge_loaded__"
-
 public typealias WVJBResponseCallback = (_ responseData: Any?) -> Void
 public typealias WVJBHandler = (_ data: Any?, _ responseCallback: WVJBResponseCallback?) -> Void
-public typealias WVJBMessage = [String: Any]
+//public typealias WVJBMessage = [String: Any]
 
-protocol WebViewJavascriptBridgeBaseDelegate {
-    func evaluateJavascript(_ javascriptCommand: String) -> String
+struct WVJBMessage {
+    var handlerName: String
+    var data: Any?
+    var callbackId: String?
+    
+//    var responseMessage: WVJBResponseMessage?
+    
+    init(handlerName: String) {
+        self.handlerName = handlerName
+    }
+    
+
+    var toDictionary: [String: Any] {
+        var dict: [String: Any] = ["handlerName": handlerName]
+        if data != nil {
+            dict["data"] = data
+        }
+        if callbackId != nil {
+            dict["callbackId"] = callbackId
+        }
+        return dict
+    }
+}
+
+struct WVJBResponseMessage {
+
+    var responseId: String
+    var responseData: Any?
+    
+    init(responseId: String) {
+        self.responseId = responseId
+    }
 }
 
 open class HLYWebViewJSBridge: NSObject {
@@ -27,11 +52,11 @@ open class HLYWebViewJSBridge: NSObject {
     private static var logging = false
     private static var logMaxLength = 500
     
-    fileprivate var responseCallbackUniqueId = 0
+    fileprivate var callbackUniqueId = 0
     
     fileprivate lazy var messageHandlers = [String: WVJBHandler]()
     fileprivate lazy var responseCallbacks = [String: WVJBResponseCallback]()
-    fileprivate lazy var startupMessageQueue: [WVJBMessage]? = { [WVJBMessage]() }()
+    fileprivate lazy var messageQueue: [WVJBMessage]? = { [WVJBMessage]() }()
     fileprivate weak var webView: WKWebView?
     public weak var webViewDelegate: WKNavigationDelegate?
     
@@ -39,7 +64,10 @@ open class HLYWebViewJSBridge: NSObject {
     public class func setLogMaxLength(_ length: Int) { logMaxLength = length }
     
     deinit {
-//        self.webViewDelegate = nil
+        //self.webViewDelegate = nil
+        #if DEBUG
+        print("<\(NSStringFromClass(type(of: self))) is deinit>")
+        #endif
     }
     
     fileprivate override init() {
@@ -77,20 +105,19 @@ extension HLYWebViewJSBridge {
     }
     
     public func callHandler(_ handlerName: String, data: Any?, responseCallback: WVJBResponseCallback?) {
-        var message = WVJBMessage()
-
-        if let data = data {
-            message["data"] = data
-        }
+        var message = WVJBMessage(handlerName: handlerName)
+        message.data = data
         if let callback = responseCallback {
-            responseCallbackUniqueId += 1
-            let callbackId = "objc_cb_\(responseCallbackUniqueId)"
+            callbackUniqueId += 1
+            let callbackId = "objc_cb_\(callbackUniqueId)"
             self.responseCallbacks[callbackId] = callback
-            message["callbackId"] = callbackId
+            message.callbackId = callbackId
         }
-        message["handlerName"] = handlerName
         
-        self.queueMessage(message)
+//        self.queueMessage(message.toDictionary)
+
+            startupMessage(message)
+        
     }
 
     public func disableJavscriptAlertBoxSafetyTimeout() {
@@ -108,13 +135,11 @@ extension HLYWebViewJSBridge: WKNavigationDelegate {
         guard let url = navigationAction.request.url else {
             return
         }
-        //print("==> decidePolicyFor: \(url)")
-        if isJavascriptBridgeURL(url) {
+
+        if isJSBridgeURL(url) {
             if isBridgeLoadedURL(url) {
-                //print("==> injectJavascriptFile: \(url)")
                 injectJavascriptFile()
             } else if isQueueMessageURL(url) {
-                //print("==> flushMessageQueue: \(url)")
                 flushMessageQueue()
             } else {
                 // Unkown Message
@@ -134,7 +159,7 @@ extension HLYWebViewJSBridge: WKNavigationDelegate {
     
     public func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         if webView != self.webView { return }
-        //print("==> navigationResponse: \(navigationResponse.response.url)")
+
         if self.webViewDelegate?.webView?(webView, decidePolicyFor: navigationResponse, decisionHandler: decisionHandler) == nil {
             decisionHandler(WKNavigationResponsePolicy.allow)
         }
@@ -180,15 +205,66 @@ extension HLYWebViewJSBridge: WKNavigationDelegate {
 
 extension HLYWebViewJSBridge {
     
-    private func queueMessage(_ message: WVJBMessage) {
-        if self.startupMessageQueue != nil {
-            self.startupMessageQueue!.append(message)
-        } else {
-            self.dispatchMessage(message)
+    private func injectJavascriptFile() {
+        guard let bundleURL = Bundle(for: HLYWebViewJSBridge.self).url(forResource: "HLYWebViewJSBridge", withExtension: "bundle"),
+            let path = Bundle(url: bundleURL)?.path(forResource: "HLYWebViewJSBridge", ofType: "js") else {
+            fatalError("The `HLYWebViewJSBridge.js` file could not be found")
+        }
+        
+        do {
+            let jsContext = try String(contentsOfFile: path, encoding: .utf8)
+            self.webView?.evaluateJavaScript(jsContext, completionHandler: nil)
+            
+            log(action: "injectJavascriptFile", message: jsContext)
+            
+            // js注入完成后，开启发送本地消息
+            startupMessage(nil)
+        } catch let error as NSError {
+            NSLog("WVJB Inject Javascript File Error: \(error.localizedDescription)")
         }
     }
     
-    private func dispatchMessage(_ message: WVJBMessage) {
+    /// 开启发送本地暂存的 callHandler 消息
+    private func startupMessage(_ message: WVJBMessage?) {
+        guard let messageQueue = self.messageQueue else {
+            if let message = message {
+                dispatchMessage(message.toDictionary)
+            }
+            return
+        }
+        
+        // 发送所有暂存消息
+        guard let message = message else {
+            messageQueue.forEach({ message in
+                dispatchMessage(message.toDictionary)
+            })
+            self.messageQueue = nil // 完成后置空消息队列(只在启动过程中用一次)
+            return
+        }
+        
+        // js未注入Web页面前，先暂存本地 callHandler 消息
+        self.messageQueue!.append(message)
+    }
+    
+//    private func queueMessage(_ message: [String: Any]) {
+//        if self.messageQueue != nil {
+//            var msg = WVJBMessage(handlerName: message["handlerName"] as! String)
+//            if let data = message["data"] {
+//                msg.data = data
+//            }
+//            if let callbackId = message["callbackId"] as? String {
+//                msg.callbackId = callbackId
+//            }
+//            self.messageQueue!.append(msg)
+//        } else {
+//            self.dispatchMessage(message)
+//        }
+//    }
+    
+    // add Native callHandler
+    private func dispatchMessage(_ message: [String: Any]) {
+        log(action: "dispatchMessage", message: message)
+        
         guard let jsonMsg = escapeMessage(message), let webView = self.webView else {
             return
         }
@@ -203,108 +279,97 @@ extension HLYWebViewJSBridge {
         }
     }
     
+    /// Add H5 callHandler
     private func flushMessageQueue() {
         self.webView?.evaluateJavaScript("WebViewJavascriptBridge._fetchQueue();", completionHandler: { (result, error) in
             if error != nil {
                 NSLog("WVJB WARNING: Error when trying to fetch data from WKWebView: \(error!.localizedDescription)")
             }
-            if let message = result as? String {
-                self.handleQueueMessage(message)
+            self.log(action: "fetchMessageQueue", message: result as Any)
+            if let jsonMessageString = result as? String {
+                self.handleQueueMessage(jsonMessageString)
             }
         })
     }
     
-    private func handleQueueMessage(_ jsonMessage: String) {
-        if jsonMessage.isEmpty {
+    private func handleQueueMessage(_ jsonString: String) {
+        if jsonString.isEmpty {
             NSLog("WVJB WARNING: Native got nil while fetching the message queue JSON from webview. This can happen if the WebViewJavascriptBridge JS is not currently present in the webview, e.g if the webview just loaded a new page.");
             return
         }
 
-        guard let messages = deserializeMessage(jsonMessage) as? Array<Any> else {
+        guard let messages = deserializeMessage(jsonString) as? Array<Any> else {
             NSLog("WVJB Handle Message Error: message is not array")
             return
         }
 
+        /// 数据格式:
+        /// [
+        ///     {"handlerName":"nativeFunc","data":"Hello world"},
+        ///     {"handlerName":"callHandler_1","data":{"foo":"bar"},"callbackId":"cb_1_1589540375410"}
+        /// ]
         for item in messages {
-            guard let message = item as? WVJBMessage else {
+            guard let message = item as? [String: Any] else {
                 NSLog("WVJB WARNING: Invalid message received: \(item)")
                 continue
             }
-            log(action: "Received Message", message: message)
+            //log(action: "Received Message", message: message)
             
             // Native callback(JS完成Native调用后)
             if let responseId = message["responseId"] as? String {
                 if let responseCallback = self.responseCallbacks[responseId] {
+                    log(action: "messageHandler.responseCallback", message: "\(message)")
                     responseCallback(message["responseData"] ?? NSNull())
                 } else {
                     NSLog("WVJB Handle Message Error: no matching callback closure for: \(message)")
                 }
                 self.responseCallbacks.removeValue(forKey: responseId)
-            } else { // JS call Native Handler
+            } else {
+                // JS 端调用 Native --> dispatchMessage()
                 guard let handlerName = message["handlerName"] as? String,
                     let messageHandler = self.messageHandlers[handlerName] else {
-                    NSLog("WVJB Handle Message Error: no handler for message from JS: %@", message);
+                    NSLog("WVJB Error: Unregistered native handler for JS: %@", message);
                     continue
                 }
                 
-                let responseCallback: WVJBResponseCallback = {
+                let responseCallback: WVJBResponseCallback? = {
                     if let callbackId = message["callbackId"] as? String {
                         return { [unowned self] (responseData: Any?) -> Void in
                             let respData: Any = responseData ?? NSNull()
-                            let respMessage: WVJBMessage = ["responseId": callbackId as Any, "responseData": respData]
-                            self.queueMessage(respMessage)
-                        }
-                    } else {
-                        return { (responseData: Any?) -> Void in
-                            // emtpy closure, make sure callback closure param is non-optional
+                            let respMessage: [String: Any] = ["responseId": callbackId as Any, "responseData": respData]
+//                            self.queueMessage(respMessage)
+                            self.dispatchMessage(respMessage)
                         }
                     }
+                    return nil
                 }()
+                
+                log(action: "messageHandler", message: "\(message)")
                 messageHandler(message["data"], responseCallback)
             }
         }
     }
-    
-    private func injectJavascriptFile() {
-        guard let bundleURL = Bundle(for: HLYWebViewJSBridge.self).url(forResource: "HLYWebViewJSBridge", withExtension: "bundle"),
-            let path = Bundle(url: bundleURL)?.path(forResource: "HLYWebViewJSBridge", ofType: "js") else {
-            fatalError("The `HLYWebViewJSBridge.js` file could not be found")
-        }
-        
-        do {
-            let jsContext = try String(contentsOfFile: path, encoding: .utf8)
-            self.webView?.evaluateJavaScript(jsContext, completionHandler: nil)
-            if let queuedMessage = self.startupMessageQueue {
-                for message in queuedMessage {
-                    dispatchMessage(message)
-                }
-                self.startupMessageQueue = nil // TODO 仅为了添加一个默认 Message
-            }
-        } catch let error as NSError {
-            NSLog("WVJB Inject Javascript File Error: \(error.localizedDescription)")
-        }
-    }
 
-    private func isJavascriptBridgeURL(_ url: URL) -> Bool {
-        if isSchemeMatch(url) == false {
+    private func isJSBridgeURL(_ url: URL) -> Bool {
+        if isSchemeMatchURL(url) == false {
             return false
         }
         return isBridgeLoadedURL(url) || isQueueMessageURL(url)
     }
-
-    private func isSchemeMatch(_ url: URL) -> Bool {
-        let scheme = url.scheme?.lowercased()
-        return scheme == kNewProtocolScheme || scheme == kOldProtocolScheme
+    
+    private func isBridgeLoadedURL(_ url: URL) -> Bool {
+        let host = url.host?.lowercased()
+        return isSchemeMatchURL(url) && host == "__bridge_loaded__"
     }
 
     private func isQueueMessageURL(_ url: URL) -> Bool {
         let host = url.host?.lowercased()
-        return isSchemeMatch(url) && host == kQueueHasMessage
+        return isSchemeMatchURL(url) && host == "__wvjb_queue_message__"
     }
-
-    private func isBridgeLoadedURL(_ url: URL) -> Bool {
-        let host = url.host?.lowercased()
-        return isSchemeMatch(url) && host == kBridgeLoaded
+    
+    private func isSchemeMatchURL(_ url: URL) -> Bool {
+        let scheme = url.scheme?.lowercased()
+        return scheme == "https" || scheme == "wvjbscheme"
     }
 
     // MARK: - SwiftWebViewBridge & JSON Serilization

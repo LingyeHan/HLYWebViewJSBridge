@@ -14,8 +14,8 @@
 		setTimeout(function() { document.documentElement.removeChild(WVJBIframe) }, 0)
 	}
 
+    // 注册 JS 方法给 Native 调用
 	setupWebViewJavascriptBridge(function(bridge) {
-		bridge.callHandler('nativeFunc', 'Hello world');
 		bridge.registerHandler('echoHandler', function(data, responseCallback) {
 			responseCallback(data)
 		})
@@ -29,5 +29,10 @@
 			})
 		})
 	})
+
+    // JS 调用 Native 方法
+    setupWebViewJavascriptBridge(function(bridge) {
+        bridge.callHandler('nativeFunc', 'Hello world');
+    })
 	</script>
 </body></html>
